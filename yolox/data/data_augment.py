@@ -147,10 +147,10 @@ def _mirror(image, boxes, prob=0.5):
         boxes[:, 0::2] = width - boxes[:, 2::-2]
     return image, boxes
 
-
+# letterbox
 def preproc(img, input_size, swap=(2, 0, 1)):
     if len(img.shape) == 3:
-        padded_img = np.ones((input_size[0], input_size[1], 3), dtype=np.uint8) * 114
+        padded_img = np.ones((input_size[0], input_size[1], 3), dtype=np.uint8) * 114  # HWC
     else:
         padded_img = np.ones(input_size, dtype=np.uint8) * 114
 
@@ -162,11 +162,11 @@ def preproc(img, input_size, swap=(2, 0, 1)):
     ).astype(np.uint8)
     padded_img[: int(img.shape[0] * r), : int(img.shape[1] * r)] = resized_img
 
-    padded_img = padded_img.transpose(swap)
+    padded_img = padded_img.transpose(swap) # CHW
     padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
     return padded_img, r
 
-
+# hsv + _mirror + letterbox
 class TrainTransform:
     def __init__(self, max_labels=50, flip_prob=0.5, hsv_prob=1.0):
         self.max_labels = max_labels
@@ -175,7 +175,7 @@ class TrainTransform:
 
     def __call__(self, image, targets, input_dim):
         boxes = targets[:, :4].copy()
-        labels = targets[:, 4].copy()
+        labels = targets[:, 4].copy() # cls_id
         if len(boxes) == 0:
             targets = np.zeros((self.max_labels, 5), dtype=np.float32)
             image, r_o = preproc(image, input_dim)
@@ -202,6 +202,9 @@ class TrainTransform:
         boxes_t = boxes[mask_b]
         labels_t = labels[mask_b]
 
+        # 如果上述 boxes_t 数目是0，就用下面的方法求label。
+        # 这里其实不太懂，为何要复制两份数据，一份用 hsv + mirr + preproc， 一份只用 preproc
+        # 当 mask 没有满足情况时只用preproc，  hsv + mirr 又不会影响boxes满不满足mask条件
         if len(boxes_t) == 0:
             image_t, r_o = preproc(image_o, input_dim)
             boxes_o *= r_o

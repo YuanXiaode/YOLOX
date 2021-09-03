@@ -106,7 +106,7 @@ class YOLOXHead(nn.Module):
             self.reg_preds.append(
                 nn.Conv2d(
                     in_channels=int(256 * width),
-                    out_channels=4,
+                    out_channels=4, # 我怀疑这里写错了，应该是 self.n_anchors * 4
                     kernel_size=1,
                     stride=1,
                     padding=0,
@@ -162,7 +162,8 @@ class YOLOXHead(nn.Module):
             obj_output = self.obj_preds[k](reg_feat)
 
             if self.training:
-                output = torch.cat([reg_output, obj_output, cls_output], 1)
+                output = torch.cat([reg_output, obj_output, cls_output], 1) # (bs,85 x na,h,w)
+                # (bs,na x h x w, 85)
                 output, grid = self.get_output_and_grid(
                     output, k, stride_this_level, xin[0].type()
                 )
@@ -179,16 +180,16 @@ class YOLOXHead(nn.Module):
                     reg_output = reg_output.view(
                         batch_size, self.n_anchors, 4, hsize, wsize
                     )
+                    # (bs,h x w x na, 85)
                     reg_output = reg_output.permute(0, 1, 3, 4, 2).reshape(
                         batch_size, -1, 4
                     )
-                    origin_preds.append(reg_output.clone())
+                    origin_preds.append(reg_output.clone()) # 这个是网络输出值，未解码
 
             else:
                 output = torch.cat(
                     [reg_output, obj_output.sigmoid(), cls_output.sigmoid()], 1
-                )
-
+                )  # bchw
             outputs.append(output)
 
         if self.training:
@@ -204,7 +205,7 @@ class YOLOXHead(nn.Module):
             )
         else:
             self.hw = [x.shape[-2:] for x in outputs]
-            # [batch, n_anchors_all, 85]
+            # [batch, 85 x na, h, w]-> [batch, n_anchors_all, 85 x na]
             outputs = torch.cat(
                 [x.flatten(start_dim=2) for x in outputs], dim=2
             ).permute(0, 2, 1)
@@ -224,10 +225,12 @@ class YOLOXHead(nn.Module):
             grid = torch.stack((xv, yv), 2).view(1, 1, hsize, wsize, 2).type(dtype)
             self.grids[k] = grid
 
+        # (bs,85 x na,h,w) -> (bs,na,85,h,w) -> (bs,na x h x w, 85)
         output = output.view(batch_size, self.n_anchors, n_ch, hsize, wsize)
         output = output.permute(0, 1, 3, 4, 2).reshape(
             batch_size, self.n_anchors * hsize * wsize, -1
         )
+        # grid.shape:(1,h x w, 2)，当n_anchors != 1时， grid和output[..., :2]的第二个维度不一致，会报错哦~
         grid = grid.view(1, -1, 2)
         output[..., :2] = (output[..., :2] + grid) * stride
         output[..., 2:4] = torch.exp(output[..., 2:4]) * stride
@@ -238,14 +241,13 @@ class YOLOXHead(nn.Module):
         strides = []
         for (hsize, wsize), stride in zip(self.hw, self.strides):
             yv, xv = torch.meshgrid([torch.arange(hsize), torch.arange(wsize)])
-            grid = torch.stack((xv, yv), 2).view(1, -1, 2)
+            grid = torch.stack((xv, yv), 2).view(1, -1, 2) # (1,H x W, 2)
             grids.append(grid)
             shape = grid.shape[:2]
             strides.append(torch.full((*shape, 1), stride))
 
         grids = torch.cat(grids, dim=1).type(dtype)
         strides = torch.cat(strides, dim=1).type(dtype)
-
         outputs[..., :2] = (outputs[..., :2] + grids) * strides
         outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
         return outputs

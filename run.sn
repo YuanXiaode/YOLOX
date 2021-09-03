@@ -1,0 +1,1 @@
+python tools/train.py -n yolox-s -d 1 -b 4 --fp16 -o 

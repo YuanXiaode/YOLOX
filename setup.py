@@ -57,7 +57,7 @@ setuptools.setup(
     author="basedet team",
     python_requires=">=3.6",
     long_description=long_description,
-    ext_modules=get_extensions(),
+    ext_modules=get_extensions(),  # C++拓展 也就是python调C++  https://blog.csdn.net/mingqi1996/article/details/88766619
     classifiers=["Programming Language :: Python :: 3", "Operating System :: OS Independent"],
     cmdclass={"build_ext": torch.utils.cpp_extension.BuildExtension},
     packages=setuptools.find_packages(),

@@ -59,8 +59,8 @@ def configure_module(ulimit_value=8192):
     try:
         import resource
 
-        rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-        resource.setrlimit(resource.RLIMIT_NOFILE, (ulimit_value, rlimit[1]))
+        rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)  ## 设置最大能打开的文件数
+        resource.setrlimit(resource.RLIMIT_NOFILE, (ulimit_value, rlimit[1]))  ## (软限制，硬限制)，打开文件数不能大于软限制，软限制不能大于硬限制
     except Exception:
         # Exception might be raised in Windows OS or rlimit reaches max limit number.
         # However, set rlimit value might not be necessary.
@@ -68,6 +68,8 @@ def configure_module(ulimit_value=8192):
 
     # cv2
     # multiprocess might be harmful on performance of torch dataloader
+    # 这里应该是opencv的多线程和dataloader的多线程冲突了，关闭opencv多线程，详情见
+    # https: // blog.csdn.net / jacke121 / article / details / 109126670
     os.environ["OPENCV_OPENCL_RUNTIME"] = "disabled"
     try:
         cv2.setNumThreads(0)

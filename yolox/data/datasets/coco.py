@@ -12,7 +12,7 @@ from pycocotools.coco import COCO
 from ..dataloading import get_yolox_datadir
 from .datasets_wrapper import Dataset
 
-
+# 获取resize后的图像，标签，并经过 preproc
 class COCODataset(Dataset):
     """
     COCO dataset class.
@@ -22,7 +22,7 @@ class COCODataset(Dataset):
         self,
         data_dir=None,
         json_file="instances_train2017.json",
-        name="train2017",
+        name="images/train2017",  ##
         img_size=(416, 416),
         preproc=None,
         cache=False,
@@ -39,9 +39,11 @@ class COCODataset(Dataset):
         super().__init__(img_size)
         if data_dir is None:
             data_dir = os.path.join(get_yolox_datadir(), "COCO")
+        ## for test
+        print(vars(self))
+        data_dir = "../datasets/coco/"
         self.data_dir = data_dir
         self.json_file = json_file
-
         self.coco = COCO(os.path.join(self.data_dir, "annotations", self.json_file))
         self.ids = self.coco.getImgIds()
         self.class_ids = sorted(self.coco.getCatIds())
@@ -119,9 +121,9 @@ class COCODataset(Dataset):
         annotations = self.coco.loadAnns(anno_ids)
         objs = []
         for obj in annotations:
-            x1 = np.max((0, obj["bbox"][0]))
+            x1 = np.max((0, obj["bbox"][0])) # left top
             y1 = np.max((0, obj["bbox"][1]))
-            x2 = np.min((width, x1 + np.max((0, obj["bbox"][2]))))
+            x2 = np.min((width, x1 + np.max((0, obj["bbox"][2])))) # bottom right
             y2 = np.min((height, y1 + np.max((0, obj["bbox"][3]))))
             if obj["area"] > 0 and x2 >= x1 and y2 >= y1:
                 obj["clean_bbox"] = [x1, y1, x2, y2]
@@ -129,7 +131,7 @@ class COCODataset(Dataset):
 
         num_objs = len(objs)
 
-        res = np.zeros((num_objs, 5))
+        res = np.zeros((num_objs, 5)) # x1, y1, x2, y2, cls_id
 
         for ix, obj in enumerate(objs):
             cls = self.class_ids.index(obj["category_id"])
@@ -153,7 +155,7 @@ class COCODataset(Dataset):
     def load_anno(self, index):
         return self.annotations[index][0]
 
-    def load_resized_img(self, index):
+    def load_resized_img(self, index):  ## 我认为这里有点多余，因为 preproc 的时候又会resize一下
         img = self.load_image(index)
         r = min(self.img_size[0] / img.shape[0], self.img_size[1] / img.shape[1])
         resized_img = cv2.resize(
@@ -167,7 +169,6 @@ class COCODataset(Dataset):
         file_name = self.annotations[index][3]
 
         img_file = os.path.join(self.data_dir, self.name, file_name)
-
         img = cv2.imread(img_file)
         assert img is not None
 
@@ -183,7 +184,7 @@ class COCODataset(Dataset):
         else:
             img = self.load_resized_img(index)
 
-        return img, res.copy(), img_info, np.array([id_])
+        return img, res.copy(), img_info, np.array([id_])  # resize img，list of (x1,y1,x2,y2,cls), origin shape, image_id
 
     @Dataset.mosaic_getitem
     def __getitem__(self, index):
@@ -206,7 +207,6 @@ class COCODataset(Dataset):
             img_id (int): same as the input index. Used for evaluation.
         """
         img, target, img_info, img_id = self.pull_item(index)
-
         if self.preproc is not None:
-            img, target = self.preproc(img, target, self.input_dim)
+            img, target = self.preproc(img, target, self.input_dim) # hsv + _mirror + letterbox
         return img, target, img_info, img_id

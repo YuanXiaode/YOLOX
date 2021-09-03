@@ -124,7 +124,7 @@ class Trainer:
 
     def before_train(self):
         logger.info("args: {}".format(self.args))
-        logger.info("exp value:\n{}".format(self.exp))
+        # logger.info("exp value:\n{}".format(self.exp))
 
         # model related init
         torch.cuda.set_device(self.local_rank)

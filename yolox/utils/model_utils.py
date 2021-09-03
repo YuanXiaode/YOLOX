@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-from thop import profile
+from thop import profile, clever_format
 
 __all__ = [
     "fuse_conv_and_bn",
@@ -17,10 +17,9 @@ __all__ = [
 
 
 def get_model_info(model, tsize):
-
     stride = 64
     img = torch.zeros((1, 3, stride, stride), device=next(model.parameters()).device)
-    flops, params = profile(deepcopy(model), inputs=(img,), verbose=False)
+    flops, params = profile(deepcopy(model), inputs=(img,), verbose=False)  ## 这里输出的flops实际上是macs, 1 macs = 2 flops
     params /= 1e6
     flops /= 1e9
     flops *= tsize[0] * tsize[1] / stride / stride * 2  # Gflops

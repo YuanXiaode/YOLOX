@@ -51,7 +51,7 @@ class BaseExp(metaclass=ABCMeta):
     def eval(self, model, evaluator, weights):
         pass
 
-    def __repr__(self):
+    def __repr__(self):  ## print(exp)打印信息
         table_header = ["keys", "values"]
         exp_table = [
             (str(k), pprint.pformat(v))
@@ -70,6 +70,7 @@ class BaseExp(metaclass=ABCMeta):
                 if src_value is not None and src_type != type(v):
                     try:
                         v = src_type(v)
+                    ## literal_eval 见https://www.jb51.net/article/120815.htm，就是将 "[1,2,3]"的字符串转成[1,2,3]
                     except Exception:
                         v = ast.literal_eval(v)
                 setattr(self, k, v)

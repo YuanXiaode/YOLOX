@@ -17,12 +17,11 @@ def get_caller_name(depth=0):
         str: module name of the caller
     """
     # the following logic is a little bit faster than inspect.stack() logic
-    frame = inspect.currentframe().f_back
+    frame = inspect.currentframe().f_back  ## 堆栈信息
     for _ in range(depth):
         frame = frame.f_back
 
-    return frame.f_globals["__name__"]
-
+    return frame.f_globals["__name__"] # 调用该函数的文件名
 
 class StreamToLoguru:
     """
@@ -53,7 +52,7 @@ class StreamToLoguru:
     def flush(self):
         pass
 
-
+# 不太懂，大概是将pycocotools和apex里面的打印重定向到logger中，从而保存在文件中
 def redirect_sys_output(log_level="INFO"):
     redirect_logger = StreamToLoguru(log_level)
     sys.stderr = redirect_logger
@@ -77,19 +76,19 @@ def setup_logger(save_dir, distributed_rank=0, filename="log.txt", mode="a"):
         "<cyan>{name}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
     )
 
-    logger.remove()
+    logger.remove() # 不在控制台输出
     save_file = os.path.join(save_dir, filename)
     if mode == "o" and os.path.exists(save_file):
         os.remove(save_file)
     # only keep logger in rank0 process
-    if distributed_rank == 0:
+    if distributed_rank == 0: # 只有0进程输出
         logger.add(
-            sys.stderr,
+            sys.stderr,  # 输出到控制台
             format=loguru_format,
             level="INFO",
             enqueue=True,
         )
-        logger.add(save_file)
+        logger.add(save_file) # 输出到文件
 
     # redirect stdout/stderr to loguru
     redirect_sys_output("INFO")
