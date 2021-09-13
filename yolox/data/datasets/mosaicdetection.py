@@ -94,7 +94,7 @@ class MosaicDetection(Dataset):
             for i_mosaic, index in enumerate(indices):
                 img, _labels, _, _ = self._dataset.pull_item(index)
                 h0, w0 = img.shape[:2]  # orig hw
-                scale = min(1. * input_h / h0, 1. * input_w / w0)
+                scale = min(1. * input_h / h0, 1. * input_w / w0) # 这里多此一举，pull_item获取的图像已经经过下面的resize步骤了
                 img = cv2.resize(
                     img, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_LINEAR
                 )
@@ -156,29 +156,32 @@ class MosaicDetection(Dataset):
             self._dataset._input_dim = self.input_dim
             img, label, img_info, idx = self._dataset.pull_item(idx)
             img, label = self.preproc(img, label, self.input_dim)
-            return img, label, img_info, np.array([idx])
+            return img, label, img_info, np.array([idx])  ## label shape (n,5) -> class_id,x1,y1,x2,y2
 
+    # 论文给出的代替copy_paste的改进mixup
+    # 过程就是随机选一张图进行尺度缩放，然后截取大小和原图的区域与原图等权重相加，label为融合图的全部label
     def mixup(self, origin_img, origin_labels, input_dim):
-        jit_factor = random.uniform(*self.mixup_scale)
+        jit_factor = random.uniform(*self.mixup_scale) # 尺度缩放
         FLIP = random.uniform(0, 1) > 0.5
         cp_labels = []
         while len(cp_labels) == 0:
             cp_index = random.randint(0, self.__len__() - 1)
-            cp_labels = self._dataset.load_anno(cp_index)
-        img, cp_labels, _, _ = self._dataset.pull_item(cp_index)
+            cp_labels = self._dataset.load_anno(cp_index)  # x1, y1, x2, y2, cls_id
+        img, cp_labels, _, _ = self._dataset.pull_item(cp_index) # resize 过的图
 
         if len(img.shape) == 3:
             cp_img = np.ones((input_dim[0], input_dim[1], 3), dtype=np.uint8) * 114
         else:
             cp_img = np.ones(input_dim, dtype=np.uint8) * 114
 
+        # 又resize一次，重复工作
         cp_scale_ratio = min(input_dim[0] / img.shape[0], input_dim[1] / img.shape[1])
         resized_img = cv2.resize(
             img,
             (int(img.shape[1] * cp_scale_ratio), int(img.shape[0] * cp_scale_ratio)),
             interpolation=cv2.INTER_LINEAR,
         )
-
+        # 又letterbox，data_augment.preproc中实现了，直接调用即可
         cp_img[
             : int(img.shape[0] * cp_scale_ratio), : int(img.shape[1] * cp_scale_ratio)
         ] = resized_img
@@ -192,7 +195,7 @@ class MosaicDetection(Dataset):
         if FLIP:
             cp_img = cp_img[:, ::-1, :]
 
-        origin_h, origin_w = cp_img.shape[:2]
+        origin_h, origin_w = cp_img.shape[:2]  ## 这图像和大小名字取的。。。
         target_h, target_w = origin_img.shape[:2]
         padded_img = np.zeros(
             (max(origin_h, target_h), max(origin_w, target_w), 3), dtype=np.uint8
@@ -222,9 +225,9 @@ class MosaicDetection(Dataset):
         cp_bboxes_transformed_np[:, 1::2] = np.clip(
             cp_bboxes_transformed_np[:, 1::2] - y_offset, 0, target_h
         )
-        keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5)
+        keep_list = box_candidates(cp_bboxes_origin_np.T, cp_bboxes_transformed_np.T, 5) # 去除上面random crop 后太小的框
 
-        if keep_list.sum() >= 1.0:
+        if keep_list.sum() >= 1.0: # 变化后还有label
             cls_labels = cp_labels[keep_list, 4:5].copy()
             box_labels = cp_bboxes_transformed_np[keep_list]
             labels = np.hstack((box_labels, cls_labels))

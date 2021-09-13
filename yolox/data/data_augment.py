@@ -147,7 +147,7 @@ def _mirror(image, boxes, prob=0.5):
         boxes[:, 0::2] = width - boxes[:, 2::-2]
     return image, boxes
 
-# letterbox
+# letterbox，一般letterbox的pad会上下（左右）对半分，这里pad只补在右下，效果会好？
 def preproc(img, input_size, swap=(2, 0, 1)):
     if len(img.shape) == 3:
         padded_img = np.ones((input_size[0], input_size[1], 3), dtype=np.uint8) * 114  # HWC
@@ -196,7 +196,7 @@ class TrainTransform:
         image_t, r_ = preproc(image_t, input_dim)
         # boxes [xyxy] 2 [cx,cy,w,h]
         boxes = xyxy2cxcywh(boxes)
-        boxes *= r_
+        boxes *= r_   # 注意这里，因为padding补在右下，因此boxes不用平移
 
         mask_b = np.minimum(boxes[:, 2], boxes[:, 3]) > 1
         boxes_t = boxes[mask_b]
@@ -213,7 +213,7 @@ class TrainTransform:
 
         labels_t = np.expand_dims(labels_t, 1)
 
-        targets_t = np.hstack((labels_t, boxes_t))
+        targets_t = np.hstack((labels_t, boxes_t)) # 注意这里 gt变成了 class_id,cx,cy,w,h
         padded_labels = np.zeros((self.max_labels, 5))
         padded_labels[range(len(targets_t))[: self.max_labels]] = targets_t[
             : self.max_labels

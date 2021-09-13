@@ -19,7 +19,31 @@ import cv2 as cv
 import matplotlib.pyplot as plt
 from pprint import pprint
 import numpy as np
+import random
 
-labels_t = np.ones((3,3))
-labels_t = np.expand_dims(labels_t, 1)
-print(labels_t.shape)
+from yolox.utils.lr_scheduler import *
+
+# lr,
+# min_lr_ratio,
+# warmup_lr_start,
+# total_iters,
+# normal_iters,
+# no_aug_iters,
+# warmup_total_iters,
+# semi_iters,
+# iters_per_epoch,
+# iters_per_epoch_semi,
+# iters,
+
+
+
+is_in_boxes = torch.ones((2,10))
+
+is_in_boxes_anchor = torch.zeros((10))
+is_in_boxes_anchor[0] = 1
+is_in_boxes_anchor[1] = 1
+is_in_boxes_anchor = is_in_boxes_anchor.bool()
+print(is_in_boxes_anchor)
+
+
+print(is_in_boxes[:, is_in_boxes_anchor])

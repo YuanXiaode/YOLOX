@@ -150,7 +150,7 @@ class COCODataset(Dataset):
             else "{:012}".format(id_) + ".jpg"
         )
 
-        return (res, img_info, resized_info, file_name)
+        return (res, img_info, resized_info, file_name) # label, 原size, resize后的size, name
 
     def load_anno(self, index):
         return self.annotations[index][0]
@@ -177,14 +177,14 @@ class COCODataset(Dataset):
     def pull_item(self, index):
         id_ = self.ids[index]
 
-        res, img_info, resized_info, _ = self.annotations[index]
+        res, img_info, resized_info, _ = self.annotations[index] # 写的很乱，res 已经resize过了,img要下面的代码resize
         if self.imgs is not None:
             pad_img = self.imgs[index]
             img = pad_img[: resized_info[0], : resized_info[1], :].copy()
         else:
             img = self.load_resized_img(index)
 
-        return img, res.copy(), img_info, np.array([id_])  # resize img，list of (x1,y1,x2,y2,cls), origin shape, image_id
+        return img, res.copy(), img_info, np.array([id_])  # resize img，(N.5) (x1,y1,x2,y2,cls), origin shape, image_id
 
     @Dataset.mosaic_getitem
     def __getitem__(self, index):

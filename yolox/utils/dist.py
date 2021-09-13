@@ -163,24 +163,24 @@ def _pad_to_largest_tensor(tensor, group):
     assert (
         world_size >= 1
     ), "comm.gather/all_gather must be called from ranks within the given group!"
-    local_size = torch.tensor([tensor.numel()], dtype=torch.int64, device=tensor.device)
+    local_size = torch.tensor([tensor.numel()], dtype=torch.int64, device=tensor.device)  ##  tensor是当前worker的值，每个worker预测的值是可能不一样的
     size_list = [
         torch.zeros([1], dtype=torch.int64, device=tensor.device)
         for _ in range(world_size)
     ]
-    dist.all_gather(size_list, local_size, group=group)
+    dist.all_gather(size_list, local_size, group=group)  ## 汇总所有worker的tensor的大小
     size_list = [int(size.item()) for size in size_list]
 
     max_size = max(size_list)
 
     # we pad the tensor because torch all_gather does not support
     # gathering tensors of different shapes
-    if local_size != max_size:
+    if local_size != max_size:  ## 即每个worker的tensor长度补成一样的
         padding = torch.zeros(
             (max_size - local_size,), dtype=torch.uint8, device=tensor.device
         )
         tensor = torch.cat((tensor, padding), dim=0)
-    return size_list, tensor
+    return size_list, tensor  ## size_list保存了每个worker的tensor的原始长度
 
 
 def all_gather(data, group=None):
@@ -201,7 +201,7 @@ def all_gather(data, group=None):
     if dist.get_world_size(group) == 1:
         return [data]
 
-    tensor = _serialize_to_tensor(data, group)
+    tensor = _serialize_to_tensor(data, group) # data编码放入tensor
 
     size_list, tensor = _pad_to_largest_tensor(tensor, group)
     max_size = max(size_list)
@@ -211,7 +211,7 @@ def all_gather(data, group=None):
         torch.empty((max_size,), dtype=torch.uint8, device=tensor.device)
         for _ in size_list
     ]
-    dist.all_gather(tensor_list, tensor, group=group)
+    dist.all_gather(tensor_list, tensor, group=group)  # 汇总所有的worker的tensor到tensor_list里
 
     data_list = []
     for size, tensor in zip(size_list, tensor_list):
@@ -244,7 +244,7 @@ def gather(data, dst=0, group=None):
     rank = dist.get_rank(group=group)
 
     tensor = _serialize_to_tensor(data, group)
-    size_list, tensor = _pad_to_largest_tensor(tensor, group)
+    size_list, tensor = _pad_to_largest_tensor(tensor, group) # 补齐tensor长度
 
     # receiving Tensor from all ranks
     if rank == dst:

@@ -126,12 +126,14 @@ class COCOEvaluator:
         if distributed:
             data_list = gather(data_list, dst=0)
             data_list = list(itertools.chain(*data_list))
-            torch.distributed.reduce(statistics, dst=0)
+            torch.distributed.reduce(statistics, dst=0) # 所有worker的时间求均值
 
         eval_results = self.evaluate_prediction(data_list, statistics)
         synchronize()
         return eval_results
 
+    ## outputs: (x1, y1, x2, y2, obj_conf, class_conf, class_pred) 相对于self.img_size[0]的，
+    # info_imgs：原size
     def convert_to_coco_format(self, outputs, info_imgs, ids):
         data_list = []
         for (output, img_h, img_w, img_id) in zip(
@@ -195,7 +197,7 @@ class COCOEvaluator:
         if len(data_dict) > 0:
             cocoGt = self.dataloader.dataset.coco
             # TODO: since pycocotools can't process dict in py36, write data to json file.
-            if self.testdev:
+            if self.testdev: # 因为testdev小所以保存下来？
                 json.dump(data_dict, open("./yolox_testdev_2017.json", "w"))
                 cocoDt = cocoGt.loadRes("./yolox_testdev_2017.json")
             else:
@@ -216,6 +218,6 @@ class COCOEvaluator:
             with contextlib.redirect_stdout(redirect_string):
                 cocoEval.summarize()
             info += redirect_string.getvalue()
-            return cocoEval.stats[0], cocoEval.stats[1], info
+            return cocoEval.stats[0], cocoEval.stats[1], info  # map, map50, info
         else:
             return 0, 0, info

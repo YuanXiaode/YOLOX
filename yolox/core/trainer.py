@@ -77,11 +77,11 @@ class Trainer:
 
     def train_in_epoch(self):
         for self.epoch in range(self.start_epoch, self.max_epoch):
-            self.before_epoch()
+            self.before_epoch() # 负责判断是否关mosaic，启用L1损失，及保存模型
             self.train_in_iter()
             self.after_epoch()
 
-    def train_in_iter(self):
+    def train_in_iter(self): # 每个bs
         for self.iter in range(self.max_iter):
             self.before_iter()
             self.train_one_iter()
@@ -90,10 +90,11 @@ class Trainer:
     def train_one_iter(self):
         iter_start_time = time.time()
 
-        inps, targets = self.prefetcher.next()
+        inps, targets = self.prefetcher.next() # target (class_id,x1,y1,x2,y2)
         inps = inps.to(self.data_type)
         targets = targets.to(self.data_type)
         targets.requires_grad = False
+        # 处理的图像是(640,640)，缩放至 self.input_size，注意self.input_size初始是(640,640)，但每个epoch后都会随机改变
         inps, targets = self.exp.preprocess(inps, targets, self.input_size)
         data_end_time = time.time()
 
@@ -110,6 +111,7 @@ class Trainer:
         if self.use_model_ema:
             self.ema_model.update(self.model)
 
+        # yolov5是每个epoch才更新lr，这里更新的更频繁
         lr = self.lr_scheduler.update_lr(self.progress_in_iter + 1)
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr

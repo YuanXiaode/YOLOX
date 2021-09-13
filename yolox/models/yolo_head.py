@@ -32,7 +32,7 @@ class YOLOXHead(nn.Module):
         """
         super().__init__()
 
-        self.n_anchors = 1
+        self.n_anchors = 1  ## 这份代码有BUG，self.n_anchors > 1 都运行不了，后面都当na = 1
         self.num_classes = num_classes
         self.decode_in_inference = True  # for deploy, set to False
 
@@ -106,7 +106,7 @@ class YOLOXHead(nn.Module):
             self.reg_preds.append(
                 nn.Conv2d(
                     in_channels=int(256 * width),
-                    out_channels=4, # 我怀疑这里写错了，应该是 self.n_anchors * 4
+                    out_channels=4,
                     kernel_size=1,
                     stride=1,
                     padding=0,
@@ -139,7 +139,7 @@ class YOLOXHead(nn.Module):
             b = conv.bias.view(self.n_anchors, -1)
             b.data.fill_(-math.log((1 - prior_prob) / prior_prob))
             conv.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
-
+    # label (bs,N,5), each element is (class_id,cx,cy,w,h)
     def forward(self, xin, labels=None, imgs=None):
         outputs = []
         origin_preds = []
@@ -162,8 +162,8 @@ class YOLOXHead(nn.Module):
             obj_output = self.obj_preds[k](reg_feat)
 
             if self.training:
-                output = torch.cat([reg_output, obj_output, cls_output], 1) # (bs,85 x na,h,w)
-                # (bs,na x h x w, 85)
+                output = torch.cat([reg_output, obj_output, cls_output], 1) # (bs,na x 85,h,w)
+                # output: (bs,na x h x w, 85), 已解码
                 output, grid = self.get_output_and_grid(
                     output, k, stride_this_level, xin[0].type()
                 )
@@ -173,18 +173,18 @@ class YOLOXHead(nn.Module):
                     torch.zeros(1, grid.shape[1])
                     .fill_(stride_this_level)
                     .type_as(xin[0])
-                )
+                ) # (1,h x w)
                 if self.use_l1:
-                    batch_size = reg_output.shape[0]
+                    batch_size = reg_output.shape[0]  # 注意reg_output是未解码
                     hsize, wsize = reg_output.shape[-2:]
                     reg_output = reg_output.view(
                         batch_size, self.n_anchors, 4, hsize, wsize
                     )
-                    # (bs,h x w x na, 85)
+                    # (bs,h x w x na, 4)
                     reg_output = reg_output.permute(0, 1, 3, 4, 2).reshape(
                         batch_size, -1, 4
                     )
-                    origin_preds.append(reg_output.clone()) # 这个是网络输出值，未解码
+                    origin_preds.append(reg_output.clone())
 
             else:
                 output = torch.cat(
@@ -205,7 +205,7 @@ class YOLOXHead(nn.Module):
             )
         else:
             self.hw = [x.shape[-2:] for x in outputs]
-            # [batch, 85 x na, h, w]-> [batch, n_anchors_all, 85 x na]
+            # [batch, 85 x na, h, w]-> [batch, n_anchors_all, 85 x na], n_anchors_all = h1 x w1 + h2 x w2 + h3 x w3
             outputs = torch.cat(
                 [x.flatten(start_dim=2) for x in outputs], dim=2
             ).permute(0, 2, 1)
@@ -213,13 +213,13 @@ class YOLOXHead(nn.Module):
                 return self.decode_outputs(outputs, dtype=xin[0].type())
             else:
                 return outputs
-
+    # na > 1就有BUG，这里全部取na=1
     def get_output_and_grid(self, output, k, stride, dtype):
         grid = self.grids[k]
 
         batch_size = output.shape[0]
         n_ch = 5 + self.num_classes
-        hsize, wsize = output.shape[-2:]
+        hsize, wsize = output.shape[-2:] # bcwh
         if grid.shape[2:4] != output.shape[2:4]:
             yv, xv = torch.meshgrid([torch.arange(hsize), torch.arange(wsize)])
             grid = torch.stack((xv, yv), 2).view(1, 1, hsize, wsize, 2).type(dtype)
@@ -230,7 +230,7 @@ class YOLOXHead(nn.Module):
         output = output.permute(0, 1, 3, 4, 2).reshape(
             batch_size, self.n_anchors * hsize * wsize, -1
         )
-        # grid.shape:(1,h x w, 2)，当n_anchors != 1时， grid和output[..., :2]的第二个维度不一致，会报错哦~
+        # grid.shape:(1,h x w, 2)，当n_anchors > 1时， grid和output[..., :2]的第二个维度不一致，会报错哦~
         grid = grid.view(1, -1, 2)
         output[..., :2] = (output[..., :2] + grid) * stride
         output[..., 2:4] = torch.exp(output[..., 2:4]) * stride
@@ -268,17 +268,17 @@ class YOLOXHead(nn.Module):
         cls_preds = outputs[:, :, 5:]  # [batch, n_anchors_all, n_cls]
 
         # calculate targets
-        mixup = labels.shape[2] > 5
+        mixup = labels.shape[2] > 5  # label shape (bs,n,5), per element is (clss_id,cx,cy,w,h)
         if mixup:
             label_cut = labels[..., :5]
         else:
             label_cut = labels
-        nlabel = (label_cut.sum(dim=2) > 0).sum(dim=1)  # number of objects
+        nlabel = (label_cut.sum(dim=2) > 0).sum(dim=1)  # (bs,) 虽然nlabel维度为(bs,n,5),但不是每一个图都有n个gt，有些是用0补成的n个
 
         total_num_anchors = outputs.shape[1]
         x_shifts = torch.cat(x_shifts, 1)  # [1, n_anchors_all]
         y_shifts = torch.cat(y_shifts, 1)  # [1, n_anchors_all]
-        expanded_strides = torch.cat(expanded_strides, 1)
+        expanded_strides = torch.cat(expanded_strides, 1)  # [1, n_anchors_all]
         if self.use_l1:
             origin_preds = torch.cat(origin_preds, 1)
 
@@ -316,15 +316,15 @@ class YOLOXHead(nn.Module):
                         batch_idx,
                         num_gt,
                         total_num_anchors,
-                        gt_bboxes_per_image,
-                        gt_classes,
-                        bboxes_preds_per_image,
+                        gt_bboxes_per_image,           ## (num_gt,4)
+                        gt_classes,                    ## (num_gt)
+                        bboxes_preds_per_image,        ## [n_anchors_all, 4]
                         expanded_strides,
                         x_shifts,
                         y_shifts,
-                        cls_preds,
-                        bbox_preds,
-                        obj_preds,
+                        cls_preds,                     ## [batch, n_anchors_all, n_cls]
+                        bbox_preds,                    ## [batch, n_anchors_all, 4]
+                        obj_preds,                     ## [batch, n_anchors_all, 1]
                         labels,
                         imgs,
                     )
@@ -428,6 +428,7 @@ class YOLOXHead(nn.Module):
         l1_target[:, 3] = torch.log(gt[:, 3] / stride + eps)
         return l1_target
 
+    # 这里是simOTA
     @torch.no_grad()
     def get_assignments(
         self,
@@ -457,6 +458,9 @@ class YOLOXHead(nn.Module):
             x_shifts = x_shifts.cpu()
             y_shifts = y_shifts.cpu()
 
+        # 该函数根据GT的形状，从 n_anchors_all 个点中选出待分配的 num_in_boxes_anchor 个点（直接去除大部分不用考虑的明显的负例，减少计算量）
+        # fg_mask: (n_anchors_all)  待分配的点
+        # is_in_boxes_and_center : [n_gt, num_in_boxes_anchor]  待分配的点中，距离gt太远的标记为0
         fg_mask, is_in_boxes_and_center = self.get_in_boxes_info(
             gt_bboxes_per_image,
             expanded_strides,
@@ -475,6 +479,7 @@ class YOLOXHead(nn.Module):
             gt_bboxes_per_image = gt_bboxes_per_image.cpu()
             bboxes_preds_per_image = bboxes_preds_per_image.cpu()
 
+        # [n_gt, 4] + [num_in_boxes_anchor,4] -> [n_gt,num_in_boxes_anchor]
         pair_wise_ious = bboxes_iou(gt_bboxes_per_image, bboxes_preds_per_image, False)
 
         gt_cls_per_image = (
@@ -482,7 +487,7 @@ class YOLOXHead(nn.Module):
             .float()
             .unsqueeze(1)
             .repeat(1, num_in_boxes_anchor, 1)
-        )
+        ) # (n_gt,num_in_boxes_anchor,80)
         pair_wise_ious_loss = -torch.log(pair_wise_ious + 1e-8)
 
         if mode == "cpu":
@@ -492,16 +497,20 @@ class YOLOXHead(nn.Module):
             cls_preds_ = (
                 cls_preds_.float().unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
                 * obj_preds_.unsqueeze(0).repeat(num_gt, 1, 1).sigmoid_()
-            )
+            ) #  (n_gt,num_in_boxes_anchor,80)
             pair_wise_cls_loss = F.binary_cross_entropy(
                 cls_preds_.sqrt_(), gt_cls_per_image, reduction="none"
             ).sum(-1)
         del cls_preds_
 
+        # 对每个gt，cost越小的grid point 越容易分配为正例
+        # 规则：和对应gt的iou越小，类别损失越小，距离不太远的cost越小
+        # 打个比方，gt1和gt2都包含了a点，那么a点是属于gt1还是gt2呢？以前的YOLO系列是根据iou来判定，而这里是根据cost来判定的。
+        # 该算法还能确定每个gt到底应该分配多少个点
         cost = (
             pair_wise_cls_loss
             + 3.0 * pair_wise_ious_loss
-            + 100000.0 * (~is_in_boxes_and_center)
+            + 100000.0 * (~is_in_boxes_and_center) # 距离修正，离GT中点太远，直接给很大的损失，也就是直接pass远点。
         )
 
         (
@@ -528,7 +537,7 @@ class YOLOXHead(nn.Module):
 
     def get_in_boxes_info(
         self,
-        gt_bboxes_per_image,
+        gt_bboxes_per_image, # (n,4), (cx,cy,w,h), 是相对于原图的尺寸
         expanded_strides,
         x_shifts,
         y_shifts,
@@ -542,7 +551,7 @@ class YOLOXHead(nn.Module):
             (x_shifts_per_image + 0.5 * expanded_strides_per_image)
             .unsqueeze(0)
             .repeat(num_gt, 1)
-        )  # [n_anchor] -> [n_gt, n_anchor]
+        )  # [n_anchors_all] -> [n_gt, n_anchors_all]
         y_centers_per_image = (
             (y_shifts_per_image + 0.5 * expanded_strides_per_image)
             .unsqueeze(0)
@@ -570,18 +579,20 @@ class YOLOXHead(nn.Module):
             .repeat(1, total_num_anchors)
         )
 
-        b_l = x_centers_per_image - gt_bboxes_per_image_l
+        # gt box 的区域
+        b_l = x_centers_per_image - gt_bboxes_per_image_l # 网格的中心和box四边距离
         b_r = gt_bboxes_per_image_r - x_centers_per_image
         b_t = y_centers_per_image - gt_bboxes_per_image_t
         b_b = gt_bboxes_per_image_b - y_centers_per_image
-        bbox_deltas = torch.stack([b_l, b_t, b_r, b_b], 2)
+        bbox_deltas = torch.stack([b_l, b_t, b_r, b_b], 2)  # [n_gt, n_anchors_all, 4]
 
-        is_in_boxes = bbox_deltas.min(dim=-1).values > 0.0
-        is_in_boxes_all = is_in_boxes.sum(dim=0) > 0
+        is_in_boxes = bbox_deltas.min(dim=-1).values > 0.0  # [n_gt, n_anchors_all]
+        is_in_boxes_all = is_in_boxes.sum(dim=0) > 0        # [n_anchors_all]
         # in fixed center
 
         center_radius = 2.5
 
+        # 以gt中心为中点，边长为 center_radius * expanded_strides_per_image 的矩形区域
         gt_bboxes_per_image_l = (gt_bboxes_per_image[:, 0]).unsqueeze(1).repeat(
             1, total_num_anchors
         ) - center_radius * expanded_strides_per_image.unsqueeze(0)
@@ -604,10 +615,10 @@ class YOLOXHead(nn.Module):
         is_in_centers_all = is_in_centers.sum(dim=0) > 0
 
         # in boxes and in centers
-        is_in_boxes_anchor = is_in_boxes_all | is_in_centers_all
+        is_in_boxes_anchor = is_in_boxes_all | is_in_centers_all  # [n_anchor]： 至少有一个gt在box或center中
 
         is_in_boxes_and_center = (
-            is_in_boxes[:, is_in_boxes_anchor] & is_in_centers[:, is_in_boxes_anchor]
+            is_in_boxes[:, is_in_boxes_anchor] & is_in_centers[:, is_in_boxes_anchor]   # [n_gt, N]， 记录即在box又在center中的GT
         )
         return is_in_boxes_anchor, is_in_boxes_and_center
 
@@ -620,6 +631,7 @@ class YOLOXHead(nn.Module):
         n_candidate_k = min(10, ious_in_boxes_matrix.size(1))
         topk_ious, _ = torch.topk(ious_in_boxes_matrix, n_candidate_k, dim=1)
         dynamic_ks = torch.clamp(topk_ious.sum(1).int(), min=1)
+        # 对每个gt，取cost最小的前ks个位置分配1.0
         for gt_idx in range(num_gt):
             _, pos_idx = torch.topk(
                 cost[gt_idx], k=dynamic_ks[gt_idx].item(), largest=False
@@ -628,6 +640,7 @@ class YOLOXHead(nn.Module):
 
         del topk_ious, dynamic_ks, pos_idx
 
+        # 若有位置对应了多个gt，则取最小cost的gt分配1.0，其余归零
         anchor_matching_gt = matching_matrix.sum(0)
         if (anchor_matching_gt > 1).sum() > 0:
             _, cost_argmin = torch.min(cost[:, anchor_matching_gt > 1], dim=0)

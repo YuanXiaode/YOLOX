@@ -106,7 +106,8 @@ class Exp(BaseExp):
         )
 
         local_rank = get_local_rank()
-
+        # TrainTransform : hsv + mirr + 特殊letterbox, 且将gt 从(x1,y1,x2,y2,class_id) 变成了 (class_id,cx,cy,w,h)
+        # COCODataset: resize + TrainTransform
         with wait_for_the_master(local_rank):
             dataset = COCODataset(
                 data_dir=self.data_dir,
@@ -118,7 +119,9 @@ class Exp(BaseExp):
                     hsv_prob=self.hsv_prob),
                 cache=cache_img,
             )
-
+        # MosaicDetection: resize + mosaic + random_perspective + 定制mixup + TrainTransform
+        # 若 mosaic = False，就只进行 resize + TrainTransform
+        # 作者用装饰器实现了动态控制是否用mosaic
         dataset = MosaicDetection(
             dataset,
             mosaic=not no_aug,
@@ -143,8 +146,10 @@ class Exp(BaseExp):
         if is_distributed:
             batch_size = batch_size // dist.get_world_size()
 
+        ## 实现无限数据流，并且自动将数据切分到DDP模型的每个workers
         sampler = InfiniteSampler(len(self.dataset), seed=self.seed if self.seed else 0)
 
+        ## 将id -> (mosaic, id),用来实现提前15个epoch关掉mosaic
         batch_sampler = YoloBatchSampler(
             sampler=sampler,
             batch_size=batch_size,
@@ -184,6 +189,7 @@ class Exp(BaseExp):
         input_size = (tensor[0].item(), tensor[1].item())
         return input_size
 
+    # targets: (bs,n,5)
     def preprocess(self, inputs, targets, tsize):
         scale = tsize[0] / self.input_size[0]
         if scale != 1:
@@ -239,6 +245,8 @@ class Exp(BaseExp):
     def get_eval_loader(self, batch_size, is_distributed, testdev=False, legacy=False):
         from yolox.data import COCODataset, ValTransform
 
+        ## ValTransform：特殊letterbox
+        # COCODataset: resize + TrainTransform
         valdataset = COCODataset(
             data_dir=self.data_dir,
             json_file=self.val_ann if not testdev else "image_info_test-dev2017.json",

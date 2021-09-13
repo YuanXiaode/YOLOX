@@ -101,7 +101,7 @@ class Dataset(torchDataset):
             ...         return self.enable_mosaic
         """
 
-        @wraps(getitem_fn)  ## 很绕，就是可以通过传入 [0,id] 或 [1,id] 实现控制 self.enable_mosaic
+        @wraps(getitem_fn)  ## 很绕，就是可以通过传入 [0,id] 或 [1,id] 实现控制 enable_mosaic 变量
         def wrapper(self, index):
             if not isinstance(index, int):
                 self.enable_mosaic = index[0]
