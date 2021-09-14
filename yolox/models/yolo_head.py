@@ -125,7 +125,7 @@ class YOLOXHead(nn.Module):
         self.use_l1 = False
         self.l1_loss = nn.L1Loss(reduction="none")
         self.bcewithlog_loss = nn.BCEWithLogitsLoss(reduction="none")
-        self.iou_loss = IOUloss(reduction="none")
+        self.iou_loss = IOUloss(reduction="none") # 普通iou
         self.strides = strides
         self.grids = [torch.zeros(1)] * len(in_channels)
 
@@ -306,12 +306,12 @@ class YOLOXHead(nn.Module):
                 bboxes_preds_per_image = bbox_preds[batch_idx]
 
                 try:
-                    (
-                        gt_matched_classes,
-                        fg_mask,
-                        pred_ious_this_matching,
-                        matched_gt_inds,
-                        num_fg_img,
+                    (                                   # 这函数功能是从 n_anchors_all 个点中挑出候选点，并分配gt
+                        gt_matched_classes,             # shape (num_fg_img), 候选点对应的gt class
+                        fg_mask,                        # shape (num_gt,n_anchors_all) 候选点的mask
+                        pred_ious_this_matching,        # shape (num_fg_img), 候选点和对应的gt的iou
+                        matched_gt_inds,                # shape (num_fg_img), 候选点对应的gt的 id
+                        num_fg_img,                     # 候选点的数量
                     ) = self.get_assignments(  # noqa
                         batch_idx,
                         num_gt,
@@ -364,10 +364,10 @@ class YOLOXHead(nn.Module):
 
                 cls_target = F.one_hot(
                     gt_matched_classes.to(torch.int64), self.num_classes
-                ) * pred_ious_this_matching.unsqueeze(-1)
+                ) * pred_ious_this_matching.unsqueeze(-1)  # 细节：分类乘了iou
                 obj_target = fg_mask.unsqueeze(-1)
                 reg_target = gt_bboxes_per_image[matched_gt_inds]
-                if self.use_l1:
+                if self.use_l1: # l1 损失，就是对未解码的pred和gt计算损失，gt要编码成和pred一样的形式
                     l1_target = self.get_l1_target(
                         outputs.new_zeros((num_fg_img, 4)),
                         gt_bboxes_per_image[matched_gt_inds],
@@ -392,14 +392,14 @@ class YOLOXHead(nn.Module):
 
         num_fg = max(num_fg, 1)
         loss_iou = (
-            self.iou_loss(bbox_preds.view(-1, 4)[fg_masks], reg_targets)
+            self.iou_loss(bbox_preds.view(-1, 4)[fg_masks], reg_targets) # 坐标损失
         ).sum() / num_fg
         loss_obj = (
-            self.bcewithlog_loss(obj_preds.view(-1, 1), obj_targets)
+            self.bcewithlog_loss(obj_preds.view(-1, 1), obj_targets)   # 置信度损失
         ).sum() / num_fg
         loss_cls = (
             self.bcewithlog_loss(
-                cls_preds.view(-1, self.num_classes)[fg_masks], cls_targets
+                cls_preds.view(-1, self.num_classes)[fg_masks], cls_targets  # 分类损失
             )
         ).sum() / num_fg
         if self.use_l1:
@@ -418,7 +418,7 @@ class YOLOXHead(nn.Module):
             loss_obj,
             loss_cls,
             loss_l1,
-            num_fg / max(num_gts, 1),
+            num_fg / max(num_gts, 1), # 候选点数目 / gt数目
         )
 
     def get_l1_target(self, l1_target, gt, stride, x_shifts, y_shifts, eps=1e-8):
@@ -518,7 +518,7 @@ class YOLOXHead(nn.Module):
             gt_matched_classes,
             pred_ious_this_matching,
             matched_gt_inds,
-        ) = self.dynamic_k_matching(cost, pair_wise_ious, gt_classes, num_gt, fg_mask)
+        ) = self.dynamic_k_matching(cost, pair_wise_ious, gt_classes, num_gt, fg_mask) # 候选点fg_mask在函数dynamic_k_matching里也会更新
         del pair_wise_cls_loss, cost, pair_wise_ious, pair_wise_ious_loss
 
         if mode == "cpu":
@@ -646,15 +646,17 @@ class YOLOXHead(nn.Module):
             _, cost_argmin = torch.min(cost[:, anchor_matching_gt > 1], dim=0)
             matching_matrix[:, anchor_matching_gt > 1] *= 0.0
             matching_matrix[cost_argmin, anchor_matching_gt > 1] = 1.0
-        fg_mask_inboxes = matching_matrix.sum(0) > 0.0
+        fg_mask_inboxes = matching_matrix.sum(0) > 0.0  # 候选点是否分配待gt
         num_fg = fg_mask_inboxes.sum().item()
 
+        # 注意这里，原来的候选点fg_mask不一定都能分配到gt，通过这句更新了候选点，此后，fg_mask中为True的点全部分配到gt了
         fg_mask[fg_mask.clone()] = fg_mask_inboxes
 
-        matched_gt_inds = matching_matrix[:, fg_mask_inboxes].argmax(0)
+        matched_gt_inds = matching_matrix[:, fg_mask_inboxes].argmax(0) # 候选点对应的gt id
         gt_matched_classes = gt_classes[matched_gt_inds]
 
         pred_ious_this_matching = (matching_matrix * pair_wise_ious).sum(0)[
             fg_mask_inboxes
         ]
+        # 返回依次是：和gt匹配的候选点数目，候选点对应的gt的class，候选点和对应gt的iou，候选点对应的gt的id
         return num_fg, gt_matched_classes, pred_ious_this_matching, matched_gt_inds

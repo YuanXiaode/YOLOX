@@ -31,7 +31,7 @@ class IOUloss(nn.Module):
         area_i = torch.prod(br - tl, 1) * en
         iou = (area_i) / (area_p + area_g - area_i + 1e-16)
 
-        if self.loss_type == "iou":
+        if self.loss_type == "iou": # YOLOv5是 1 - iou
             loss = 1 - iou ** 2
         elif self.loss_type == "giou":
             c_tl = torch.min(
