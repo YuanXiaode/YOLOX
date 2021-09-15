@@ -141,7 +141,6 @@ class Trainer:
 
         # value of epoch will be set in `resume_train`
         model = self.resume_train(model)
-
         # data related init
         self.no_aug = self.start_epoch >= self.max_epoch - self.exp.no_aug_epochs
         self.train_loader = self.exp.get_data_loader(
@@ -204,6 +203,8 @@ class Trainer:
     def after_epoch(self):
         self.save_ckpt(ckpt_name="latest")
 
+        # 将各种所有rank的norm的参数(bias, weight, running_mean, running_var)求平均，并更新model
+        # 我认为bias, weight在DDP模式下会自动 reduce，而 running_mean, running_var 需要手动 reduce
         if (self.epoch + 1) % self.exp.eval_interval == 0:
             all_reduce_norm(self.model)
             self.evaluate_and_save_model()

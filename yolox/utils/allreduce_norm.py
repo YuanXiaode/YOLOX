@@ -76,7 +76,7 @@ def all_reduce(py_dict, op="sum", group=None):
     # all reduce logic across different devices.
     py_key = list(py_dict.keys())
     py_key_tensor = pyobj2tensor(py_key)
-    dist.broadcast(py_key_tensor, src=0)
+    dist.broadcast(py_key_tensor, src=0) # 将 rank = 0 的 py_key_tensor 广播到其他GPU
     py_key = tensor2pyobj(py_key_tensor)
 
     tensor_shapes = [py_dict[k].shape for k in py_key]
